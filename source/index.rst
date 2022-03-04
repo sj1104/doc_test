@@ -39,7 +39,7 @@
 - 2021.08.06 :red:`[新]` 我们与腾讯联合共建Angel4.0及Hetu：`link <https://mp.weixin.qq.com/s/03GabpMzwCi7MLvDbCGloQ>`_。
 - 2021.07.31 :red:`[新]` 我们在ACM TURC 2021开展了介绍HETU的研讨会：`link <https://www.acmturc.com/2021/en/SIGMOD_China.html>`_。
 - 2021.07.28 :red:`[新]` 我们的Hetu系统参加了软件开源创新大赛：`link <https://www.educoder.net/competitions/index/gcc_2021_projects_type1>`_。
-- 2021.07.18 :red:`[新]` 我们在GitHub上对Hetu进行开源：https://github.com/PKU-DAIR/Hetu.
+- 2021.07.18 :red:`[新]` 我们在GitHub上对Hetu进行开源：https://github.com/PKU-DAIR/Hetu。
 
 .. toctree::
    :titlesonly:
