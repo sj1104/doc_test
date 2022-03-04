@@ -76,7 +76,7 @@ pre=sess.run(None,{input:X_val.astype(np.float32)})[0]
 np.testing.assert_allclose(ath[0].asnumpy(),pre,rtol=1e-5)
 ```
 
-##### **三、** ONNX协议导入Hetu框架
+##### **三、 ONNX协议导入Hetu框架** 
 
 本节以一个Tensorflow的CNN模型转换的ONNX格式为例，说明如何将ONNX协议导入到Hetu框架中。
 
