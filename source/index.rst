@@ -18,7 +18,7 @@
 
 本项目由国家重点研发计划支持，相关成果已经发表了多篇CCF-A类高水平学术论文，目前项目已经开源在：https://github.com/PKU-DAIR/Hetu。
 
-我们欢迎所有对机器学习或分布式系统感兴趣的人提供代码、创建问题或请求。更多细节请参考贡献指南和:doc:`plan` 。
+我们欢迎所有对机器学习或分布式系统感兴趣的人提供代码、创建问题或请求。更多细节请参考贡献指南和发展计划。
 
 .. role:: red
     :class: red
@@ -43,14 +43,14 @@
 
 .. toctree::
    :titlesonly:
-   :caption: Overview
+   :caption: 概述
 
    Overview/design
    Overview/performance
 
 .. toctree::
    :titlesonly:
-   :caption: Features
+   :caption: 特征
 
    Features/content1
    Features/content2
@@ -60,14 +60,14 @@
 
 .. toctree::
    :maxdepth: 2
-   :caption: Tutorials
+   :caption: 导引
 
    Tutorials/index
    HetuML/index
 
 .. toctree::
    :maxdepth: 1
-   :caption: Development plan
+   :caption: 发展计划
 
    plan
 
