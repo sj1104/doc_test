@@ -69,7 +69,7 @@ def alexnet(x, y_):
                           with_relu=True, with_pool=False)
     x = conv_bn_relu_pool(x, 256, 256, 'alexnet_conv5',
                           with_relu=False, with_pool=True)
-    x = ht.array_reshape_op(x, (-1, 256*3*3))
+    x = ht.array_reshape_op(x, [-1, 256*3*3])
     x = fc(x, (256*3*3, 1024), name='alexnet_fc1', with_relu=True)
     x = fc(x, (1024, 512), name='alexnet_fc2', with_relu=True)
     y = fc(x, (512, 10), name='alexnet_fc3', with_relu=False)
