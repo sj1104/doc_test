@@ -29,7 +29,7 @@
 ![](benchmark6.png)
 ![](benchmark7.png)
 
-- 批次大小比较
+- 批尺寸比较
 	- Swap/Recompute
 
 ![](benchmark3.png)
