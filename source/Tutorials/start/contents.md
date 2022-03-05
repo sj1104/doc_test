@@ -11,12 +11,9 @@
 新建一个python文件，并导入Hetu以及相关的模块。
 
 ```python
-from hetu import ndarray
-from hetu import gpu_ops as ad
-from hetu import optimizer
+import hetu as ht
 from hetu import dataloader as dl
 from hetu import initializers as init
-from models.load_data import load_mnist_data, convert_to_one_hot
 import numpy as np
 ```
 
@@ -27,48 +24,26 @@ import numpy as np
 Hetu内置了数据集的加载和切分batch的方法，你可以使用以下方法加载mnist数据集。
 
 ```python
-executor_ctx = ndarray.gpu(0)
-
-opt = optimizer.SGDOptimizer(learning_rate=0.01)
+executor_ctx = ht.gpu(0)
+opt = ht.optim.SGDOptimizer(learning_rate=0.01)
 
 batch_size = 128
-
 num_epochs = 10
 
-\#data loading
-
-datasets = load_mnist_data("mnist.pkl.gz")
-
+#data loading
+print('Loading datasets...')
+datasets = ht.data.mnist()
 train_set_x, train_set_y = datasets[0]
-
 valid_set_x, valid_set_y = datasets[1]
 
-test_set_x, test_set_y = datasets[2]
-
- 
-
-def local_convert_to_one_hot(batch):
-
-  return convert_to_one_hot(batch, 10)
-
-\# model definition
-
-print('Building model...')
-
 x = dl.dataloader_op([
-
   dl.Dataloader(train_set_x, batch_size, 'train'),
-
   dl.Dataloader(valid_set_x, batch_size, 'validate'),
-
   ])
 
 y_ = dl.dataloader_op([
-
-  dl.Dataloader(train_set_y, batch_size, 'train', local_convert_to_one_hot),
-
-  dl.Dataloader(valid_set_y, batch_size, 'validate', local_convert_to_one_hot),
-
+  dl.Dataloader(train_set_y, batch_size, 'train'),
+  dl.Dataloader(valid_set_y, batch_size, 'validate'),
 ])
 ```
 
@@ -79,48 +54,32 @@ y_ = dl.dataloader_op([
 通过Hetu下的gpu_ops一步步将网络构建起来，Hetu内置了一些常用的初始化工具，你可以方便地进行模型初始化工作。
 
 ```python
+#model building
+print('Building model...')
+
 def conv_relu_avg(x, shape):
+    weight = init.random_normal(shape=shape, stddev=0.1)
+    x = ht.conv2d_op(x, weight, padding=2, stride=1)
+    x = ht.relu_op(x)
+    x = ht.avg_pool2d_op(x, kernel_H=2, kernel_W=2, padding=0, stride=2)
+    return x
 
-  weight = init.random_normal(shape=shape, stddev=0.1)
-
-  x = ad.conv2d_op(x, weight, padding=2, stride=1)
-
-  x = ad.relu_op(x)
-
-  x = ad.avg_pool2d_op(x, kernel_H=2, kernel_W=2, padding=0, stride=2)
-
-  return x
 
 def fc(x, shape):
+    weight = init.random_normal(shape=shape, stddev=0.1)
+    bias = init.random_normal(shape=shape[-1:], stddev=0.1)
+    x = ht.array_reshape_op(x, [-1, shape[0]])
+    x = ht.matmul_op(x, weight)
+    y = x + ht.broadcastto_op(bias, x)
+    return y
 
-  weight = init.random_normal(shape=shape, stddev=0.1)
 
-  bias = init.random_normal(shape=shape[-1:], stddev=0.1)
-
-  x = ad.array_reshape_op(x, (-1, shape[0]))
-
-  x = ad.matmul_op(x, weight)
-
-  y = x + ad.broadcastto_op(bias, x)
-
-  return y
-
- 
-
-print('Building CNN model...')
-
-z1 = ad.array_reshape_op(x, [-1, 1, 28, 28])
-
-z2 = conv_relu_avg(z1, (32, 1, 5, 5))
-
-z3 = conv_relu_avg(z2, (64, 32, 5, 5))
-
-y = fc(z3, (7 * 7 * 64, 10))
-
-loss = ad.softmaxcrossentropy_op(y, y_)
-
-loss = ad.reduce_mean_op(loss, [0])
-
+x = ht.array_reshape_op(x, [-1, 1, 28, 28])
+x = conv_relu_avg(x, [32, 1, 5, 5])
+x = conv_relu_avg(x, [64, 32, 5, 5])
+y = fc(x, [7 * 7 * 64, 10])
+loss = ht.softmaxcrossentropy_op(y, y_)
+loss = ht.reduce_mean_op(loss, [0])
 train_op = opt.minimize(loss)
 ```
 
@@ -129,35 +88,31 @@ train_op = opt.minimize(loss)
 模型的训练需要定义好Executor，然后直接使用Executor的run方法即可进行训练，并自动按照配置的优化器进行梯度的更新。
 
 ```python
-executor = ad.Executor([loss, y, train_op], ctx=executor_ctx, dataloader_name='train')
+eval_nodes = {'train': [loss, y, y_, train_op], 'validate': [loss, y, y_]}
+executor = ht.Executor(eval_nodes, ctx=executor_ctx)
+n_train_batches = executor.get_batch_num('train')
+n_valid_batches = executor.get_batch_num('validate')
 
-n_train_batches = executor.batch_num
-
-val_executor = ad.Executor([loss, y, y_], ctx=executor_ctx, dataloader_name='validate', inference=True)
-
-n_valid_batches = val_executor.batch_num
-
-\# training
-
+# training
 print("Start training loop...")
+running_time = 0
+for i in range(num_epochs + 1):
+    print("Epoch %d" % i)
+    loss_all = 0
+    batch_num = 0
+    correct_predictions = []
+    for minibatch_index in range(n_train_batches):
+        loss_val, predict_y, y_val, _ = executor.run('train', eval_node_list=eval_nodes['train'], convert_to_numpy_ret_vals=True)
+        loss_all += loss_val
+        batch_num += 1
+        correct_prediction = np.equal(
+            np.argmax(y_val, 1),
+            np.argmax(predict_y, 1)).astype(np.float32)
+        correct_predictions.extend(correct_prediction)
 
-for i in range(num_epochs):
-
-  print("Epoch %d" % i)
-
-  loss_all = 0
-
-  for minibatch_index in range(n_train_batches):
-
-​    loss_val, predict_y, _ = executor.run()
-
-​    loss_val = loss_val.asnumpy()
-
-​    loss_all += loss_val * x.dataloaders['train'].last_batch_size
-
-  loss_all /= len(train_set_x)
-
-  print("Loss = %f" % loss_all,end='')
+    loss_all /= batch_num
+    accuracy = np.mean(correct_predictions)
+    print("Train loss = %f Train accuracy = %f" % (loss_all, accuracy))
 ```
 
  
@@ -167,25 +122,21 @@ for i in range(num_epochs):
 你可以使用如下方法，进行模型的验证和推理，并在验证集上评估模型的精度。
 
 ```python
-#validating
-
+val_loss_all = 0
+batch_num = 0
 correct_predictions = []
-
 for minibatch_index in range(n_valid_batches):
+    loss_val, valid_y_predicted, y_val = executor.run('validate', eval_node_list=eval_nodes['validate'], convert_to_numpy_ret_vals=True)
+    val_loss_all += loss_val
+    batch_num += 1
+    correct_prediction = np.equal(
+        np.argmax(y_val, 1),
+        np.argmax(valid_y_predicted, 1)).astype(np.float32)
+    correct_predictions.extend(correct_prediction)
 
-  loss_val, valid_y_predicted, y_val = val_executor.run(convert_to_numpy_ret_vals=True)
-
-  correct_prediction = np.equal(
-
-​    np.argmax(y_val, 1),
-
-​    np.argmax(valid_y_predicted, 1)).astype(np.float)
-
-  correct_predictions.extend(correct_prediction)
-
+val_loss_all /= batch_num
 accuracy = np.mean(correct_predictions)
-
-print("\tValidation accuracy = %f" % accuracy)
+print("Validation loss = %f Validation accuracy = %f" % (val_loss_all, accuracy))
 ```
 
 ##### **六、结果输出**
@@ -193,51 +144,42 @@ print("\tValidation accuracy = %f" % accuracy)
 对于以上CNN的模型训练和推理，在训练完成之后，你会得到如下的结果，从结果中可以看出，在10个epochs内，模型训练loss不断下降，同时模型在验证集上的精确呈上升趋势。
 
 ```
+Loading datasets...
 Building model...
-
-Building CNN model...
-
 Start training loop...
-
 Epoch 0
-
-Loss = 0.710760 Validation accuracy = 0.909255
-
+Train loss = 0.790133 Train accuracy = 0.762640
+Validation loss = 0.337973 Validation accuracy = 0.902845
 Epoch 1
-
-Loss = 0.319837 Validation accuracy = 0.928786
-
+Train loss = 0.324640 Train accuracy = 0.908454
+Validation loss = 0.257370 Validation accuracy = 0.928586
 Epoch 2
-
-Loss = 0.262297 Validation accuracy = 0.939503
-
+Train loss = 0.259951 Train accuracy = 0.926623
+Validation loss = 0.218450 Validation accuracy = 0.939904
 Epoch 3
-
-Loss = 0.227060 Validation accuracy = 0.945913
-
+Train loss = 0.222016 Train accuracy = 0.937420
+Validation loss = 0.192066 Validation accuracy = 0.947716
 Epoch 4
-
-Loss = 0.201521 Validation accuracy = 0.951623
-
+Train loss = 0.195031 Train accuracy = 0.945713
+Validation loss = 0.171819 Validation accuracy = 0.953425
 Epoch 5
-
-Loss = 0.181668 Validation accuracy = 0.956130
-
+Train loss = 0.174385 Train accuracy = 0.951482
+Validation loss = 0.155746 Validation accuracy = 0.957332
 Epoch 6
-
-Loss = 0.165777 Validation accuracy = 0.960036
-
+Train loss = 0.158009 Train accuracy = 0.955789
+Validation loss = 0.142644 Validation accuracy = 0.961739
 Epoch 7
-
-Loss = 0.152779 Validation accuracy = 0.962139
-
+Train loss = 0.144659 Train accuracy = 0.959756
+Validation loss = 0.131887 Validation accuracy = 0.964443
 Epoch 8
-
-Loss = 0.141957 Validation accuracy = 0.964944
-
+Train loss = 0.133586 Train accuracy = 0.963181
+Validation loss = 0.122931 Validation accuracy = 0.966346
 Epoch 9
-
-Loss = 0.132787 Validation accuracy = 0.967849
+Train loss = 0.124299 Train accuracy = 0.965645
+Validation loss = 0.115433 Validation accuracy = 0.968650
+Epoch 10
+Train loss = 0.116425 Train accuracy = 0.967548
+Validation loss = 0.109135 Validation accuracy = 0.970553
 ```
 
 
@@ -266,35 +208,22 @@ ONNX (Open Neural Network Exchange) 是一种开源的文件格式，同时也�
 from hetu import onnx as ax
 
 W1 = init.random_normal((32,1,5,5),stddev=0.1, name='W1')
-
 W2 = init.random_normal((64,32,5,5),stddev=0.1, name='W2')
-
 W3 = init.random_normal((7*7*64,10),stddev=0.1, name='W3')
-
 b3 = init.random_normal((10,),stddev=0.1, name='b3')
 
-X = ad.Variable(name="X")
+X = ht.Variable(name="X")
+z1 = ht.conv2d_op(X, W1, padding=2, stride=1)
+z2 = ht.relu_op(z1)
+z3 = ht.avg_pool2d_op(z2, kernel_H=2, kernel_W=2, padding=0, stride=2)
+z4 = ht.conv2d_op(z3, W2, padding=2, stride=1)
+z5 = ht.relu_op(z4)
+z6 = ht.avg_pool2d_op(z5, kernel_H=2, kernel_W=2, padding=0, stride=2)
+z6_flat = ht.array_reshape_op(z6, (-1, 7 * 7 * 64))
+y =  ht.matmul_op(z6_flat, W3)+b3
 
-z1 = ad.conv2d_op(X, W1, padding=2, stride=1)
-
-z2 = ad.relu_op(z1)
-
-z3 = ad.avg_pool2d_op(z2, kernel_H=2, kernel_W=2, padding=0, stride=2)
-
-z4 = ad.conv2d_op(z3, W2, padding=2, stride=1)
-
-z5 = ad.relu_op(z4)
-
-z6 = ad.avg_pool2d_op(z5, kernel_H=2, kernel_W=2, padding=0, stride=2)
-
-z6_flat = ad.array_reshape_op(z6, (-1, 7 * 7 * 64))
-
-y =  ad.matmul_op(z6_flat, W3)+b3
-
-executor=ad.Executor([y],ctx=executor_ctx)
-
+executor=ht.Executor([y],ctx=executor_ctx)
 onnx_input_path = 'hetu_cnn_model.onnx'
-
 ax.hetu2onnx.export(executor,[X],[y],onnx_input_path)
 ```
 
@@ -306,17 +235,11 @@ ax.hetu2onnx.export(executor,[X],[y],onnx_input_path)
 import onnxruntime as rt
 
 rand = np.random.RandomState(seed=123)
-
 X_val=rand.normal(scale=0.1, size=(batch_size, 1,28,28)).astype(np.float32)
-
 ath= executor.run(feed_dict={X: X_val})
-
 sess=rt.InferenceSession(onnx_input_path)
-
 input=sess.get_inputs()[0].name
-
 pre=sess.run(None,{input:X_val.astype(np.float32)})[0]
-
 np.testing.assert_allclose(ath[0].asnumpy(),pre,rtol=1e-5)
 ```
 
@@ -330,69 +253,42 @@ np.testing.assert_allclose(ath[0].asnumpy(),pre,rtol=1e-5)
 
 ```python
 import tensorflow.compat.v1 as tf
-
 import tf2onnx
 
 rand = np.random.RandomState(seed=123)
-
 X_val = rand.normal(scale=0.1, size=(20, 784)).astype(np.float32)
 
 with tf.Session() as sess:
-
   x = tf.placeholder(dtype=tf.float32, shape=(None,784,), name='input')
-
   z1 = tf.reshape(x, [-1, 28, 28, 1])
-
   weight1 = tf.Variable(np.random.normal(scale=0.1, size=(32,1,5,5)).transpose([2, 3, 1, 0]).astype(np.float32))
-
   z2 = tf.nn.conv2d(z1, weight1, padding='SAME', strides=[1, 1, 1, 1])
-
   z3 = tf.nn.relu(z2)
-
   z4 = tf.nn.avg_pool(z3, ksize=[1, 2, 2, 1], padding='VALID', strides=[1, 2, 2, 1])
-
   weight2 = tf.Variable(np.random.normal(scale=0.1, size=(64,32,5,5)).transpose([2, 3, 1, 0]).astype(np.float32))
-
   z5 = tf.nn.conv2d(z4, weight2, padding='SAME', strides=[1, 1, 1, 1])
-
   z6 = tf.nn.relu(z5)
-
   z7 = tf.nn.avg_pool(z6, ksize=[1, 2, 2, 1], padding='VALID', strides=[1, 2, 2, 1])
-
   z8 = tf.transpose(z7, [0, 3, 1, 2])
-
   shape = (7 * 7 * 64, 10)
-
   weight3 = tf.Variable(np.random.normal(scale=0.1, size=shape).astype(np.float32))
-
   \#bias = tf.Variable(np.random.normal(scale=0.1, size=shape[-1:]).astype(np.float32))
-
   z9 = tf.reshape(z8, (-1, shape[0]))
-
   y = tf.matmul(z9, weight3) #+ bias
-
   _ = tf.identity(y,name='output')
-
+  
   sess.run(tf.global_variables_initializer())
-
   expected = sess.run(y, feed_dict={x: X_val})
-
   graph_def=tf.graph_util.convert_variables_to_constants(sess,sess.graph_def, 'output'])
 
 tf.reset_default_graph()
-
 tf.import_graph_def(graph_def, name='')
-
 model_name='tf_cnn_model.onnx'
 
 with tf.Session() as sess:
-
   onnx_graph = tf2onnx.tfonnx.process_tf_graph(sess.graph, input_names=['input:0'], output_names=['output:0'],)
-
   model_proto = onnx_graph.make_model('cnn_model')
-
   with open(model_name,'wb') as f:
-
 ​    f.write(model_proto.SerializeToString())
 ```
 
@@ -402,7 +298,7 @@ with tf.Session() as sess:
 
 ```python
 x,y =  hx.onnx2hetu.load_onnx(model_name)
-executor=ad.Executor([y],ctx=ctx)
+executor=ht.Executor([y],ctx=ctx)
 ```
 
 **3.3 转换结果对比**
@@ -412,26 +308,17 @@ executor=ad.Executor([y],ctx=ctx)
 ```python
 rand = np.random.RandomState(seed=123)
 
-datasets = load_mnist_data("mnist.pkl.gz")
-
+datasets = ht.data.mnist()
 train_set_x, train_set_y = datasets[0]
-
 valid_set_x, valid_set_y = datasets[1]
-
 test_set_x, test_set_y = datasets[2]
 
 X_val = train_set_x[:20,:]
-
 ath= executor.run(feed_dict={x: X_val})
-
 sess=rt.InferenceSession(model_name)
 
 input=sess.get_inputs()[0].name
-
 pre=sess.run(None,{input:X_val.astype(np.float32)})[0]
-
 np.testing.assert_allclose(ath[0].asnumpy(),pre,rtol=1e-2)
-
- 
 ```
 
