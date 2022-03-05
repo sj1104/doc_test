@@ -9,7 +9,7 @@
 执行以下命令克隆Hetu仓库:
 
 ```
-git clone git@github.com:Hsword/Athena.git
+git clone git@github.com:Hsword/Hetu.git
 ```
 
 
