@@ -42,7 +42,7 @@ git clone git@github.com:Hsword/Hetu.git
 
 **2)GPU版本:**
 
-- CUDA 工具包10.1 配合cuDNN v7.5+
+- CUDA Toolkit 10.1 配合cuDNN v7.5+
 
 - 请按照以下步骤下载安装CUDA和CUDNN
 
